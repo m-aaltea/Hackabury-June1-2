@@ -1,10 +1,13 @@
+import asyncio
+import ipaddress
+import socket
 from urllib.parse import urljoin, urlparse
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-GB,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Encoding": "gzip, deflate",
     "DNT": "1",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
@@ -92,6 +95,82 @@ def _block_reason(resp, html: str) -> str | None:
     return None
 
 
+async def _validate_public_url(url: str) -> None:
+    """Reject non-HTTP and private-network targets before making a request."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("URL must start with http:// or https://")
+    if parsed.username or parsed.password:
+        raise ValueError("URLs containing credentials are not supported")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("URL contains an invalid port") from exc
+    if port not in {None, 80, 443}:
+        raise ValueError("Only standard HTTP and HTTPS ports are supported")
+
+    try:
+        addresses = await asyncio.to_thread(
+            socket.getaddrinfo,
+            parsed.hostname,
+            port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror as exc:
+        raise ValueError("Website hostname could not be resolved") from exc
+
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if not ip.is_global:
+            raise ValueError("Private or local network URLs are not allowed")
+
+
+async def _get_with_safe_redirects(
+    client,
+    url: str,
+    *,
+    max_bytes: int,
+):
+    current_url = url
+    for _ in range(6):
+        await _validate_public_url(current_url)
+        request = client.build_request(
+            "GET",
+            current_url,
+            headers=_HEADERS,
+        )
+        response = await client.send(request, stream=True)
+        if response.is_redirect:
+            location = response.headers.get("location")
+            if location:
+                await response.aclose()
+                current_url = urljoin(str(response.url), location)
+                continue
+
+        content_length = response.headers.get("content-length")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = None
+            if declared_size is not None and declared_size > max_bytes:
+                await response.aclose()
+                raise ValueError("Remote response is too large")
+
+        chunks = []
+        size = 0
+        async for chunk in response.aiter_bytes():
+            size += len(chunk)
+            if size > max_bytes:
+                await response.aclose()
+                raise ValueError("Remote response is too large")
+            chunks.append(chunk)
+        response._content = b"".join(chunks)
+        await response.aclose()
+        return response
+    raise ValueError("Website redirected too many times")
+
+
 async def scrape_page(url: str) -> dict:
     import httpx
     from bs4 import BeautifulSoup
@@ -100,8 +179,8 @@ async def scrape_page(url: str) -> dict:
 
     domain = urlparse(url).netloc.replace("www.", "")
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
-        resp = await client.get(url, headers=_HEADERS)
+    async with httpx.AsyncClient(timeout=8) as client:
+        resp = await _get_with_safe_redirects(client, url, max_bytes=2_000_000)
 
         if resp.status_code == 403:
             return {
@@ -150,12 +229,15 @@ async def scrape_page(url: str) -> dict:
     image_colors: list[str] = []
     if logo_url:
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=3) as client:
-                img_resp = await client.get(logo_url, headers=_HEADERS)
-            if len(img_resp.content) < 200_000:
-                ct = ColorThief(BytesIO(img_resp.content))
-                palette = ct.get_palette(color_count=3, quality=1)
-                image_colors = [_to_hex(c) for c in palette]
+            async with httpx.AsyncClient(timeout=2) as client:
+                img_resp = await _get_with_safe_redirects(
+                    client,
+                    logo_url,
+                    max_bytes=200_000,
+                )
+            ct = ColorThief(BytesIO(img_resp.content))
+            palette = ct.get_palette(color_count=3, quality=1)
+            image_colors = [_to_hex(c) for c in palette]
         except Exception:
             pass
 

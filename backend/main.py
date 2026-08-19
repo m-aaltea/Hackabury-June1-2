@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 from fastapi import FastAPI
@@ -23,6 +24,13 @@ class ScrapeRequest(BaseModel):
 
 @app.post("/api/scrape")
 async def scrape(req: ScrapeRequest):
+    try:
+        return await asyncio.wait_for(_scrape(req), timeout=25)
+    except TimeoutError:
+        return {"error": "The website analysis timed out. Please try again."}
+
+
+async def _scrape(req: ScrapeRequest):
     t0 = time.time()
     try:
         scraped = await scrape_page(req.url)

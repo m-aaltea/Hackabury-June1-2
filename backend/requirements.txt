@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 httpx
 beautifulsoup4
+boto3
 google-genai
 colorthief
 Pillow

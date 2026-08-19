@@ -1,8 +1,9 @@
-# Copy to terraform.tfvars and fill in real values:
-#   cp terraform.tfvars.example terraform.tfvars
-#
-# Your public IP with a /32 suffix — get it with: curl ifconfig.me
-ssh_allowed_cidr = "203.0.113.10/32"
+# Copy to terraform.tfvars only when overriding these defaults.
+region              = "eu-west-2"
+project_name        = "passpreview"
+lambda_architecture = "arm64"
 
-# Name of an existing EC2 key pair (create one in AWS Console > EC2 > Key Pairs).
-key_name = "my-key-pair"
+# Cost/safety controls for the public, AI-backed endpoint.
+lambda_reserved_concurrency = 5
+api_rate_limit              = 2
+api_burst_limit             = 5

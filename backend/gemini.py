@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from functools import lru_cache
 
 from google import genai
 from google.genai import types
@@ -83,8 +84,30 @@ def _fallback(scraped: dict) -> dict:
     }
 
 
+@lru_cache(maxsize=1)
+def _parameter_api_key() -> str | None:
+    """Load the production key once per warm Lambda environment."""
+    parameter_name = os.getenv("GEMINI_PARAMETER_NAME")
+    if not parameter_name:
+        return None
+
+    import boto3
+
+    response = boto3.client("ssm").get_parameter(
+        Name=parameter_name,
+        WithDecryption=True,
+    )
+    return response["Parameter"]["Value"]
+
+
 async def analyse(scraped: dict) -> dict:
     api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key and os.getenv("GEMINI_PARAMETER_NAME"):
+        try:
+            api_key = await asyncio.to_thread(_parameter_api_key)
+        except Exception as exc:
+            print(f"[gemini] unable to load API key from SSM: {exc.__class__.__name__}")
+
     if not api_key:
         print("[gemini] GEMINI_API_KEY missing, using fallback")
         return _fallback(scraped)
@@ -102,7 +125,7 @@ async def analyse(scraped: dict) -> dict:
                     thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             ),
-            timeout=25,
+            timeout=15,
         )
         data = json.loads(response.text)
         return _validate(data)

@@ -16,9 +16,16 @@ RUN python -m venv "$VIRTUAL_ENV" \
 # ---- runtime stage: slim image with only the prebuilt venv + app code ----
 FROM python:3.14-slim
 
+# Lets the same ordinary ASGI web server run inside Lambda without changing the
+# FastAPI application into Lambda-specific handlers.
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 \
+    /lambda-adapter /opt/extensions/lambda-adapter
+
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    AWS_LWA_PORT=8000 \
+    AWS_LWA_READINESS_CHECK_PROTOCOL=tcp
 
 WORKDIR /app
 

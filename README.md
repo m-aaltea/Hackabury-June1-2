@@ -156,6 +156,8 @@ The Gemini key is read at runtime from the `GEMINI_API_KEY` environment variable
 GEMINI_API_KEY=your-key
 ```
 
+On AWS, the deploy script stores this value in an encrypted SSM parameter instead of placing it in Terraform state or the Lambda configuration. The function reads it once per warm Lambda environment.
+
 The frontend nginx container reads `BACKEND_URL` at runtime to decide where to proxy `/api` (default `http://backend:8000`).
 
 ---
@@ -200,34 +202,75 @@ docker compose up -d --build
 
 This starts the backend (port `8000`, key from `backend/.env`) and the frontend (port `8080` by default, proxying `/api` to the backend). Open http://localhost:8080. Stop everything with `docker compose down`.
 
-On the EC2 host, publish the frontend on port `80` instead:
-```bash
-FRONTEND_PORT=80 docker compose up -d --build
-```
-
 ---
 
-## Deploying to AWS (EC2 + Terraform)
+## Deploying to AWS (serverless + Terraform)
 
-The `infra/` directory provisions a single free-tier EC2 instance with Docker pre-installed, a security group (HTTP + IP-restricted SSH), and an Elastic IP.
+The production architecture is:
+
+```
+Browser
+  -> CloudFront
+       -> S3 (React/Vite files)
+       -> API Gateway HTTP API (/api/*)
+            -> Lambda container (FastAPI + Lambda Web Adapter)
+                 -> Gemini API
+```
+
+There is no database in this application, so the stack deliberately does not provision DynamoDB or RDS. User image uploads remain browser-local data URLs, and the CTA form is currently a mock that only logs in the browser.
+
+### Prerequisites
+
+- An AWS account with credentials configured locally (`aws configure` or AWS SSO)
+- Docker running
+- Terraform 1.6 or newer
+- Node.js and npm
+
+The default region is London (`eu-west-2`) and the default Lambda architecture is ARM64. Override them with `AWS_REGION` and `LAMBDA_ARCHITECTURE` if needed.
+
+### Deploy
+
+```bash
+GEMINI_API_KEY='your-key' ./deploy.sh
+```
+
+The script:
+
+1. Builds the Vite frontend.
+2. Creates the Terraform-managed ECR repository on the first run.
+3. Builds and pushes an immutable Lambda container image.
+4. Applies the full Terraform stack.
+5. Saves the Gemini key as an encrypted SSM Standard parameter.
+6. Uploads the frontend to S3 and invalidates CloudFront.
+
+Terraform shows the plan and asks for confirmation before each apply. CloudFront commonly takes several minutes to create on the first deployment. At the end, the script prints the HTTPS app URL. Run the same command for later deployments; a new immutable image tag ensures Lambda is updated.
+
+To customise Terraform settings:
+
+```bash
+cp infra/terraform.tfvars.example infra/terraform.tfvars
+```
+
+Terraform state is local and gitignored. For a team or CI/CD deployment, move it to an encrypted remote backend before sharing access.
+
+### Cost reality
+
+This should be very cheap at hobby traffic, but it is not guaranteed to stay at `$0–2/month`:
+
+- Lambda's monthly free request/compute allowance is ongoing.
+- API Gateway's one-million-call free tier lasts only 12 months; calls are pay-as-you-go after that.
+- Private ECR's 500 MB allowance also lasts only 12 months, after which the small stored image is billed per GB-month.
+- S3 storage/requests, CloudWatch logs, and the Gemini API can add separate charges.
+- CloudFront's standard free allowance is generous enough for a small static frontend.
+
+The Terraform defaults cap Lambda concurrency, throttle API Gateway, retain only five images, and expire logs after 14 days. Set a small AWS Budget alert as a separate account-level safeguard before sharing the URL publicly.
+
+### Remove the stack
 
 ```bash
 cd infra
-cp terraform.tfvars.example terraform.tfvars   # set your IP/32 and EC2 key pair name
-terraform init
-terraform plan
-terraform apply
+terraform destroy
+aws ssm delete-parameter --region eu-west-2 --name /passpreview/gemini-api-key
 ```
 
-After `apply`, SSH in and start the stack:
-
-```bash
-ssh -i ~/.ssh/<key>.pem ec2-user@<elastic-ip>   # printed as ssh_command
-sudo yum install -y git                          # git is preinstalled by user_data
-git clone <this-repo>
-cd <repo>
-echo "GEMINI_API_KEY=your-key" > backend/.env
-FRONTEND_PORT=80 docker compose up -d --build
-```
-
-The app is then available at `http://<elastic-ip>` (port 80). Check first-boot progress with `sudo tail -f /var/log/cloud-init-output.log`.
+The SSM parameter is managed outside Terraform so the secret never enters Terraform state; remove it separately as shown.
