@@ -1,6 +1,7 @@
 # Copy to terraform.tfvars only when overriding these defaults.
 region              = "eu-west-2"
 project_name        = "passpreview"
+site_enabled        = false
 lambda_architecture = "arm64"
 
 # Repository and branch allowed to deploy through GitHub Actions OIDC.

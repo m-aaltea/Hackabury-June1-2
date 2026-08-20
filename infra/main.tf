@@ -122,7 +122,7 @@ resource "aws_lambda_function" "backend" {
 
   memory_size                    = var.lambda_memory_mb
   timeout                        = 28
-  reserved_concurrent_executions = var.lambda_reserved_concurrency
+  reserved_concurrent_executions = var.site_enabled ? var.lambda_reserved_concurrency : 0
 
   environment {
     variables = {
@@ -146,7 +146,7 @@ resource "aws_lambda_function" "backend" {
 resource "aws_apigatewayv2_api" "backend" {
   name                         = "${var.project_name}-http-api"
   protocol_type                = "HTTP"
-  disable_execute_api_endpoint = false
+  disable_execute_api_endpoint = !var.site_enabled
 }
 
 resource "aws_apigatewayv2_integration" "backend" {
@@ -213,7 +213,7 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 }
 
 resource "aws_cloudfront_distribution" "app" {
-  enabled             = true
+  enabled             = var.site_enabled
   is_ipv6_enabled     = true
   comment             = var.project_name
   price_class         = "PriceClass_100"

@@ -15,6 +15,12 @@ variable "project_name" {
   }
 }
 
+variable "site_enabled" {
+  description = "Whether public traffic and Lambda execution are enabled"
+  type        = bool
+  default     = false
+}
+
 variable "github_repository" {
   description = "GitHub owner/repository allowed to deploy through OIDC"
   type        = string

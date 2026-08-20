@@ -283,6 +283,26 @@ These values are identifiers, not secrets. The Gemini API key stays in the encry
 
 After the variables exist, update the `production` branch from `experimental`. The production workflow builds an immutable ARM64 backend image, updates Lambda, publishes the frontend, waits for the CloudFront invalidation, and smoke-tests both frontend and API routing. The separate production branch avoids overwriting the older, divergent `main` branch until its conflicts are deliberately reconciled.
 
+Set the repository variable `DEPLOY_ENABLED` to `true` before using the production workflow. Leave it unset or set it to `false` while the site is suspended.
+
+### Suspend and resume
+
+The reversible suspended state preserves the AWS resources and stored artifacts while disabling CloudFront, the API Gateway public endpoint, and Lambda execution:
+
+```bash
+cd infra
+terraform apply -var='site_enabled=false'
+```
+
+To rebuild the application and bring everything online again:
+
+```bash
+cd ..
+GEMINI_API_KEY='your-key' ./deploy.sh
+```
+
+`deploy.sh` explicitly sets `site_enabled=true`. Re-enable the GitHub repository variable `DEPLOY_ENABLED=true` if future production-branch pushes should deploy automatically.
+
 ### Cost reality
 
 This should be very cheap at hobby traffic, but it is not guaranteed to stay at `$0–2/month`:

@@ -70,6 +70,7 @@ docker push "${IMAGE_URI}"
 echo "Applying the AWS infrastructure..."
 terraform apply \
   -var="region=${DEPLOY_REGION}" \
+  -var="site_enabled=true" \
   -var="lambda_architecture=${LAMBDA_ARCH}" \
   -var="image_tag=${IMAGE_TAG}"
 
