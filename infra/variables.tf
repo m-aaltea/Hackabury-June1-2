@@ -39,9 +39,9 @@ variable "lambda_memory_mb" {
 }
 
 variable "lambda_reserved_concurrency" {
-  description = "Hard concurrency ceiling to limit accidental spend"
+  description = "Reserved concurrency (-1 uses the account-level limit, required for new accounts with low quotas)"
   type        = number
-  default     = 5
+  default     = -1
 }
 
 variable "api_rate_limit" {

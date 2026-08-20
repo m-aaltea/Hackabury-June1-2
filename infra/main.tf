@@ -206,7 +206,7 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 }
 
 resource "aws_cloudfront_distribution" "app" {
-  enabled             = true
+  enabled             = false
   is_ipv6_enabled     = true
   comment             = var.project_name
   price_class         = "PriceClass_100"
@@ -261,7 +261,9 @@ resource "aws_cloudfront_distribution" "app" {
 
   viewer_certificate {
     cloudfront_default_certificate = true
-    minimum_protocol_version       = "TLSv1.2_2021"
+    # AWS fixes this value to TLSv1 for the shared cloudfront.net certificate.
+    # A stricter policy requires a custom domain and ACM certificate.
+    minimum_protocol_version = "TLSv1"
   }
 
   depends_on = [aws_s3_bucket_public_access_block.frontend]

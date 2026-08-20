@@ -6,6 +6,10 @@ INFRA_DIR="${PROJECT_ROOT}/infra"
 DEPLOY_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-${TF_VAR_region:-eu-west-2}}}"
 LAMBDA_ARCH="${LAMBDA_ARCHITECTURE:-arm64}"
 
+# Terraform's AWS SDK needs this enabled to read temporary credentials created
+# by the modern browser-based `aws login` flow.
+export AWS_SDK_LOAD_CONFIG=1
+
 case "${LAMBDA_ARCH}" in
   arm64) DOCKER_PLATFORM="linux/arm64" ;;
   x86_64) DOCKER_PLATFORM="linux/amd64" ;;
@@ -18,6 +22,14 @@ for command_name in aws docker terraform npm; do
     exit 1
   fi
 done
+
+# The browser-based `aws login` provider is newer than Terraform's AWS SDK.
+# Export its short-lived credentials into this process only; do not print them
+# or write them to disk.
+if LOGIN_CREDENTIALS="$(aws configure export-credentials --format env 2>/dev/null)"; then
+  eval "${LOGIN_CREDENTIALS}"
+  unset LOGIN_CREDENTIALS
+fi
 
 aws sts get-caller-identity --region "${DEPLOY_REGION}" >/dev/null
 docker info >/dev/null

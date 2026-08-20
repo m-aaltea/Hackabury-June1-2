@@ -263,7 +263,7 @@ This should be very cheap at hobby traffic, but it is not guaranteed to stay at 
 - S3 storage/requests, CloudWatch logs, and the Gemini API can add separate charges.
 - CloudFront's standard free allowance is generous enough for a small static frontend.
 
-The Terraform defaults cap Lambda concurrency, throttle API Gateway, retain only five images, and expire logs after 14 days. Set a small AWS Budget alert as a separate account-level safeguard before sharing the URL publicly.
+The Terraform defaults use the AWS account-level Lambda concurrency quota, throttle API Gateway, retain only five images, and expire logs after 14 days. New AWS accounts commonly begin with a low account-level concurrency quota. Set a small AWS Budget alert as a separate account-level safeguard before sharing the URL publicly.
 
 ### Remove the stack
 

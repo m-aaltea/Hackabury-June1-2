@@ -4,6 +4,6 @@ project_name        = "passpreview"
 lambda_architecture = "arm64"
 
 # Cost/safety controls for the public, AI-backed endpoint.
-lambda_reserved_concurrency = 5
+lambda_reserved_concurrency = -1
 api_rate_limit              = 2
 api_burst_limit             = 5
