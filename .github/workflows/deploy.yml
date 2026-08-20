@@ -1,5 +1,7 @@
 name: Deploy to AWS
 
+# Infrastructure remains Terraform-managed; this workflow releases app code.
+
 on:
   push:
     branches:
