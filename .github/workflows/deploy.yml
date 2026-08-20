@@ -1,0 +1,142 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - production
+    paths:
+      - backend/**
+      - frontend/**
+      - .github/workflows/deploy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: passpreview-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REPOSITORY: passpreview-backend
+  LAMBDA_FUNCTION: passpreview-backend
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+  APP_URL: ${{ vars.APP_URL }}
+
+jobs:
+  deploy:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check required repository variables
+        shell: bash
+        run: |
+          test -n "${AWS_ROLE_ARN}" || { echo "Missing repository variable: AWS_ROLE_ARN" >&2; exit 1; }
+          test -n "${CLOUDFRONT_DISTRIBUTION_ID}" || { echo "Missing repository variable: CLOUDFRONT_DISTRIBUTION_ID" >&2; exit 1; }
+          test -n "${APP_URL}" || { echo "Missing repository variable: APP_URL" >&2; exit 1; }
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+
+      - name: Configure temporary AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Select immutable backend image tag
+        shell: bash
+        run: echo "IMAGE_URI=${{ steps.ecr-login.outputs.registry }}/${ECR_REPOSITORY}:git-${GITHUB_SHA}" >> "${GITHUB_ENV}"
+
+      - name: Build and push ARM64 backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ env.IMAGE_URI }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Release backend image to Lambda
+        shell: bash
+        run: |
+          aws lambda update-function-code \
+            --region "${AWS_REGION}" \
+            --function-name "${LAMBDA_FUNCTION}" \
+            --image-uri "${IMAGE_URI}" >/dev/null
+          aws lambda wait function-updated-v2 \
+            --region "${AWS_REGION}" \
+            --function-name "${LAMBDA_FUNCTION}"
+
+      - name: Publish frontend to S3
+        shell: bash
+        run: |
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          FRONTEND_BUCKET="passpreview-web-${ACCOUNT_ID}-${AWS_REGION}"
+
+          aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}" \
+            --region "${AWS_REGION}" \
+            --delete \
+            --exclude index.html \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp frontend/dist/index.html "s3://${FRONTEND_BUCKET}/index.html" \
+            --region "${AWS_REGION}" \
+            --cache-control "no-cache" \
+            --content-type "text/html"
+
+      - name: Invalidate CloudFront cache
+        shell: bash
+        run: |
+          INVALIDATION_ID="$(aws cloudfront create-invalidation \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)"
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --id "${INVALIDATION_ID}"
+
+      - name: Smoke-test production
+        shell: bash
+        run: |
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 10 --retry-all-errors \
+            "${APP_URL}" >/dev/null
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 10 --retry-all-errors \
+            --request OPTIONS \
+            --header "Origin: ${APP_URL}" \
+            --header "Access-Control-Request-Method: POST" \
+            "${APP_URL}/api/scrape" >/dev/null

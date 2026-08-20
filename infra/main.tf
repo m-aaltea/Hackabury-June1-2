@@ -130,6 +130,12 @@ resource "aws_lambda_function" "backend" {
     }
   }
 
+  # Application images are released by GitHub Actions (or deploy.sh). Keep
+  # Terraform responsible for the function configuration, not each release.
+  lifecycle {
+    ignore_changes = [image_uri]
+  }
+
   depends_on = [
     aws_cloudwatch_log_group.backend,
     aws_iam_role_policy_attachment.lambda_logs,
@@ -138,8 +144,9 @@ resource "aws_lambda_function" "backend" {
 }
 
 resource "aws_apigatewayv2_api" "backend" {
-  name          = "${var.project_name}-http-api"
-  protocol_type = "HTTP"
+  name                         = "${var.project_name}-http-api"
+  protocol_type                = "HTTP"
+  disable_execute_api_endpoint = false
 }
 
 resource "aws_apigatewayv2_integration" "backend" {
@@ -206,7 +213,7 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 }
 
 resource "aws_cloudfront_distribution" "app" {
-  enabled             = false
+  enabled             = true
   is_ipv6_enabled     = true
   comment             = var.project_name
   price_class         = "PriceClass_100"

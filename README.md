@@ -253,6 +253,36 @@ cp infra/terraform.tfvars.example infra/terraform.tfvars
 
 Terraform state is local and gitignored. For a team or CI/CD deployment, move it to an encrypted remote backend before sharing access.
 
+### GitHub Actions
+
+The repository contains two workflows:
+
+- `.github/workflows/ci.yml` builds the frontend and backend for pull requests and pushes to `experimental`.
+- `.github/workflows/deploy.yml` releases application changes when they reach `production`, or when it is started manually from the Actions tab.
+
+The deployment workflow deliberately does not run Terraform while the Terraform state remains local. Terraform owns the AWS infrastructure; GitHub Actions owns application releases to the existing Lambda and S3 bucket.
+
+GitHub authenticates with short-lived OIDC credentials. The Terraform-managed role trusts only the `production` branch of `m-aaltea/Hackabury-June1-2` and has access only to the PassPreview deployment resources. Do not create an IAM user or save AWS access keys in GitHub.
+
+Create the AWS role once from a locally authenticated terminal:
+
+```bash
+cd infra
+terraform apply
+```
+
+Then copy these Terraform outputs into **GitHub repository variables** under **Settings → Secrets and variables → Actions → Variables**:
+
+| GitHub variable | Value |
+| --- | --- |
+| `AWS_ROLE_ARN` | `terraform output -raw github_actions_role_arn` |
+| `CLOUDFRONT_DISTRIBUTION_ID` | `terraform output -raw cloudfront_distribution_id` |
+| `APP_URL` | `terraform output -raw app_url` |
+
+These values are identifiers, not secrets. The Gemini API key stays in the encrypted AWS SSM parameter and is never sent to GitHub.
+
+After the variables exist, update the `production` branch from `experimental`. The production workflow builds an immutable ARM64 backend image, updates Lambda, publishes the frontend, waits for the CloudFront invalidation, and smoke-tests both frontend and API routing. The separate production branch avoids overwriting the older, divergent `main` branch until its conflicts are deliberately reconciled.
+
 ### Cost reality
 
 This should be very cheap at hobby traffic, but it is not guaranteed to stay at `$0–2/month`:

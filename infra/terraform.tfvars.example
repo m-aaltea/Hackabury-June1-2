@@ -3,6 +3,10 @@ region              = "eu-west-2"
 project_name        = "passpreview"
 lambda_architecture = "arm64"
 
+# Repository and branch allowed to deploy through GitHub Actions OIDC.
+github_repository    = "m-aaltea/Hackabury-June1-2"
+github_deploy_branch = "production"
+
 # Cost/safety controls for the public, AI-backed endpoint.
 lambda_reserved_concurrency = -1
 api_rate_limit              = 2

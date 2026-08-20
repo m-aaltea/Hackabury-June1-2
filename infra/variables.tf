@@ -15,6 +15,23 @@ variable "project_name" {
   }
 }
 
+variable "github_repository" {
+  description = "GitHub owner/repository allowed to deploy through OIDC"
+  type        = string
+  default     = "m-aaltea/Hackabury-June1-2"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "github_repository must use the owner/repository format."
+  }
+}
+
+variable "github_deploy_branch" {
+  description = "Only this GitHub branch may assume the AWS deployment role"
+  type        = string
+  default     = "production"
+}
+
 variable "image_tag" {
   description = "Immutable backend image tag pushed by deploy.sh"
   type        = string

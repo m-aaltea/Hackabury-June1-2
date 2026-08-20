@@ -73,6 +73,25 @@ terraform apply \
   -var="lambda_architecture=${LAMBDA_ARCH}" \
   -var="image_tag=${IMAGE_TAG}"
 
+# Terraform owns the Lambda configuration, while deploy.sh and GitHub Actions
+# own application image releases. Avoid an unnecessary update on first deploy.
+LAMBDA_FUNCTION="$(terraform output -raw lambda_function_name)"
+CURRENT_IMAGE_URI="$(aws lambda get-function \
+  --region "${DEPLOY_REGION}" \
+  --function-name "${LAMBDA_FUNCTION}" \
+  --query 'Code.ImageUri' \
+  --output text)"
+if [[ "${CURRENT_IMAGE_URI}" != "${IMAGE_URI}" ]]; then
+  echo "Releasing the backend image to Lambda..."
+  aws lambda update-function-code \
+    --region "${DEPLOY_REGION}" \
+    --function-name "${LAMBDA_FUNCTION}" \
+    --image-uri "${IMAGE_URI}" >/dev/null
+  aws lambda wait function-updated-v2 \
+    --region "${DEPLOY_REGION}" \
+    --function-name "${LAMBDA_FUNCTION}"
+fi
+
 GEMINI_PARAMETER_NAME="$(terraform output -raw gemini_parameter_name)"
 if [[ -n "${GEMINI_API_KEY:-}" ]]; then
   echo "Saving the Gemini key as an encrypted SSM parameter..."

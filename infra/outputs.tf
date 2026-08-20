@@ -27,3 +27,13 @@ output "gemini_parameter_name" {
   description = "Secure SSM parameter read by the Lambda function"
   value       = local.gemini_parameter_name
 }
+
+output "lambda_function_name" {
+  description = "Lambda function updated by application deployments"
+  value       = aws_lambda_function.backend.function_name
+}
+
+output "github_actions_role_arn" {
+  description = "Set this as the GitHub repository variable AWS_ROLE_ARN"
+  value       = aws_iam_role.github_deploy.arn
+}
